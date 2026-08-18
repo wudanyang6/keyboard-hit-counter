@@ -28,14 +28,16 @@
 
 ## 3. 技术栈
 
-- 语言：Swift 6。
+- 语言：Swift 6 工具链（Swift 5 语言模式，规避与 C 互操作、AppKit 回调的严格并发摩擦）。
 - UI：SwiftUI + AppKit（`NSStatusItem` + `NSPopover` + `NSHostingView`）。
 - 事件：Quartz `CGEventTap`（`listenOnly` + `.headInsertEventTap`）。
 - 前台应用：`NSWorkspace`。
-- 构建：SwiftPM（可执行目标 + C 目标 + 测试目标），`Makefile` 打包为 `.app`。
-- 无第三方依赖，锁无关计数用 C11 `_Atomic int64_t`。
+- 构建：SwiftPM（C 目标 + 核心库目标 + 可执行目标 + 测试目标），`Makefile` 打包为 `.app`。
+- 无第三方依赖，锁无关计数用 C11 `_Atomic int64_t`，经不透明 C 结构体暴露给 Swift（规避 Swift 对 `_Atomic` 类型的互操作问题）。
 
 ## 4. 架构与模块
+
+> **目标布局**：模块 4.1–4.7 位于 `KeyboardHitCounterCore` 库目标（可被测试目标 `import`）；模块 4.8–4.10 位于 `KeyboardHitCounter` 可执行目标（SwiftPM 测试目标无法导入可执行目标，故拆分）。
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -58,19 +60,24 @@
 
 ### 4.1 `CAtomic`（C 目标）
 
-`Sources/CAtomic/atomic_counter.h` 与 `atomic_counter.c`：基于 C11 `_Atomic int64_t` 的锁无关原语。
+`Sources/CAtomic/atomic_counter.h` 与 `atomic_counter.c`：基于 C11 `_Atomic int64_t` 的锁无关原语。对外用**不透明结构体** `khc_counters_t` 封装（C 侧持有 `_Atomic` 计数器数组 + 原子 `current_slot`），规避 Swift 对 `_Atomic` 类型的互操作问题；内存由 C 侧分配/释放。
 
 ```c
-typedef _Atomic(int64_t) khc_counter_t;
+typedef struct khc_counters khc_counters_t;
 
-int64_t khc_counter_increment(khc_counter_t *counter); // 返回递增后的值
-int64_t khc_counter_load(const khc_counter_t *counter);
-void    khc_counter_store(khc_counter_t *counter, int64_t value);
+khc_counters_t *khc_counters_create(int64_t capacity);          // 分配 capacity 个计数器，全零
+void khc_counters_destroy(khc_counters_t *c);
+
+int64_t khc_counters_increment_current(khc_counters_t *c);      // 热路径：counter[current_slot] 原子 +1
+int64_t khc_counters_load(const khc_counters_t *c, int64_t slot);
+void    khc_counters_set_current_slot(khc_counters_t *c, int64_t slot);
+int64_t khc_counters_current_slot(const khc_counters_t *c);
+int64_t khc_counters_capacity(const khc_counters_t *c);
 ```
 
 ### 4.2 `CounterStore`（锁无关计数）
 
-`Sources/KeyboardHitCounter/CounterStore.swift`
+`Sources/KeyboardHitCounterCore/CounterStore.swift`
 
 - 持有连续内存的 slot 计数器数组，以及一个原子 `currentSlot`。
 - **容量固定**：`maxSlots = 512` 的 `_Atomic int64_t` 数组在**启动时一次性分配，运行期永不扩容、永不移动内存**。这是热路径无锁读的安全前提——一旦运行期扩容会移动内存，热路径读旧指针即 use-after-free，因此禁止运行期扩容。
@@ -89,7 +96,7 @@ final class CounterStore {
 
 ### 4.3 `AppSlotRegistry`（bundleID ↔ slot 映射）
 
-`Sources/KeyboardHitCounter/AppSlotRegistry.swift`
+`Sources/KeyboardHitCounterCore/AppSlotRegistry.swift`
 
 - 运行时内存映射，`os_unfair_lock` 保护。**不在热路径访问**；温路径（应用切换时分配 slot）与冷路径（聚合时反查 bundleID）均低频、经同一把锁访问。
 - 槽位分配在 `[1, CounterStore.maxSlots)` 内单调递增、运行期不复用；分配满后返回 0（忽略）。槽位永不释放，因此 slot 与计数器的对应关系稳定。
@@ -104,7 +111,7 @@ final class AppSlotRegistry {
 
 ### 4.4 `FrontmostAppTracker`（前台应用追踪）
 
-`Sources/KeyboardHitCounter/FrontmostAppTracker.swift`
+`Sources/KeyboardHitCounterCore/FrontmostAppTracker.swift`
 
 - 订阅 `NSWorkspace.didActivateApplicationNotification`，解析 bundleID，走 `AppSlotRegistry` 得到 slot，再 `CounterStore.setCurrentSlot`。
 - 当前台是自身（`Bundle.main.bundleIdentifier`）或 bundleID 缺失时，slot 置 0。
@@ -122,7 +129,7 @@ final class FrontmostAppTracker {
 
 ### 4.4.1 `AppMetadataStore`（应用显示名/图标缓存）
 
-`Sources/KeyboardHitCounter/AppMetadataStore.swift`
+`Sources/KeyboardHitCounterCore/AppMetadataStore.swift`
 
 - 线程安全的 `bundleID → 显示信息` 内存缓存，`os_unfair_lock` 保护，仅温路径写入、冷路径读取。
 
@@ -140,7 +147,7 @@ final class AppMetadataStore {
 
 ### 4.5 `KeyEventTap`（全局键盘监听）
 
-`Sources/KeyboardHitCounter/KeyEventTap.swift`
+`Sources/KeyboardHitCounterCore/KeyEventTap.swift`
 
 - `CGEvent.tapCreate` 使用 `.cgSessionEventTap` + `.headInsertEventTap` + `.listenOnly`，事件匹配 `keyDown`。
 - 挂到独立线程的高优先级 `CFRunLoop`（`userInteractive` QoS），不挂主线程。
@@ -162,7 +169,7 @@ final class KeyEventTap {
 
 ### 4.6 `PersistenceStore`（持久化 I/O）
 
-`Sources/KeyboardHitCounter/PersistenceStore.swift`
+`Sources/KeyboardHitCounterCore/PersistenceStore.swift`
 
 - 纯 I/O 与数据模型层：负责 `DailyCounts` 的读盘、累加、写盘。**不含节流与 delta 计算**（见 4.6.1 `PersistenceWorker`）。
 - 对外接口：
@@ -183,7 +190,7 @@ final class PersistenceStore {
 
 ### 4.6.1 `PersistenceWorker`（持久化调度）
 
-`Sources/KeyboardHitCounter/PersistenceWorker.swift`
+`Sources/KeyboardHitCounterCore/PersistenceWorker.swift`
 
 - 后台串行队列 + **固定 5 秒周期定时器**（非「仅变化时写」），加退出时 `flushNow()`。
 - 采用**增量（delta）方案**保证无丢数：持有 `lastSnapshotBySlot: [Int64]`（与 slot 一一对应，新 slot 以 0 补齐）。每轮读取 `CounterStore.countsBySlot()`，对每个非 0 slot 计算 `delta = 当前 - lastSnapshot[slot]`，经 `AppSlotRegistry.bundleID(forSlot:)` 映射成 bundleID，调用 `PersistenceStore.accumulate(deltas:dayKey:)` 累加进当日桶，再 `save()`。**不重置热路径计数器**——按键若落在「读」与「更新 lastSnapshot」之间，会被下一轮 delta 捕获，无丢失。
@@ -196,17 +203,19 @@ final class PersistenceWorker {
          store: PersistenceStore)
     func start()
     func stop()
-    func flushNow()      // 退出时同步执行一次 delta 落盘
+    func flushNow()                              // 退出时同步执行一次 delta 落盘
+    func sessionDeltaByBundleID() -> [String: Int64]  // 未落盘增量（session − 已合并），供聚合展示
 }
 ```
 
 ### 4.7 `Aggregator`（聚合）
 
-`Sources/KeyboardHitCounter/Aggregator.swift`
+`Sources/KeyboardHitCounterCore/Aggregator.swift`
 
-- 后台定时 1 秒，合并「持久化累计 + session 增量」产出 UI 列表快照。
-- `todayCount = days[today][bundleID] + session[bundleID]`
-- `totalCount = Σ days[*][bundleID] + session[bundleID]`
+- 后台定时 1 秒，合并「持久化累计 + 未落盘增量」产出 UI 列表快照。
+- `todayCount = days[today][bundleID] + sessionDelta[bundleID]`
+- `totalCount = Σ days[*][bundleID] + sessionDelta[bundleID]`
+- 其中 `sessionDelta[bundleID]` = 本会话**尚未落盘**的增量（`session − 已合并`），由 `PersistenceWorker.sessionDeltaByBundleID()` 提供，避免重复累计已落盘部分。
 - 对外接口：
 
 ```swift
@@ -221,12 +230,13 @@ struct AppRow: Identifiable {
 
 final class Aggregator {
     func produceRows(counts: DailyCounts,
-                     sessionByBundleID: [String: Int64],
-                     metadataByBundleID: [String: AppMetadata]) -> [AppRow]
+                     sessionDeltaByBundleID: [String: Int64],
+                     metadataByBundleID: [String: AppMetadata],
+                     dayKey: String) -> [AppRow]
 }
 ```
 
-`AppMetadata` 定义见 4.4.1。`sessionByBundleID` 与 `metadataByBundleID` 由调用方（AppDelegate 装配层）在后台生成，`produceRows` 保持纯函数、可独立测试。
+`AppMetadata` 定义见 4.4.1。`sessionDeltaByBundleID` 与 `metadataByBundleID` 由调用方（AppDelegate 装配层）在后台生成，`produceRows` 保持纯函数、可独立测试。
 
 ### 4.8 `StatusViewModel`（UI 状态）
 
@@ -318,7 +328,7 @@ keydown → [系统不等待] → 回调：counter[slot] += 1（纳秒，wait-fr
 
 ## 9. 构建与打包
 
-- `swift build` 产出可执行文件。
+- `swift build` 产出可执行文件（`KeyboardHitCounter` 可执行目标，依赖 `KeyboardHitCounterCore` 与 `CAtomic`）。
 - `make app` 组装 `KeyboardHitCounter.app`：
   - 复制可执行文件到 `Contents/MacOS/`。
   - 生成 `Contents/Info.plist`：`LSUIElement = true`（纯菜单栏，无 Dock 图标）、`CFBundleIdentifier = dev.local.KeyboardHitCounter`、`NSHighResolutionCapable`。
