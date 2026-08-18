@@ -72,8 +72,6 @@ let package = Package(
 #define ATOMIC_COUNTER_H
 #include <stdint.h>
 
-typedef struct khc_counters khc_counters_t;
-
 void *khc_counters_create(int64_t capacity);
 void khc_counters_destroy(void *handle);
 int64_t khc_counters_increment_current(void *handle);
@@ -1328,7 +1326,6 @@ public enum PermissionState {
     case granted
 }
 
-@MainActor
 public final class StatusViewModel: ObservableObject {
     @Published public var rows: [AppRow] = []
     @Published public var permissionState: PermissionState = .unknown

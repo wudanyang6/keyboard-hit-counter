@@ -60,19 +60,17 @@
 
 ### 4.1 `CAtomic`（C 目标）
 
-`Sources/CAtomic/atomic_counter.h` 与 `atomic_counter.c`：基于 C11 `_Atomic int64_t` 的锁无关原语。对外用**不透明结构体** `khc_counters_t` 封装（C 侧持有 `_Atomic` 计数器数组 + 原子 `current_slot`），规避 Swift 对 `_Atomic` 类型的互操作问题；内存由 C 侧分配/释放。
+`Sources/CAtomic/atomic_counter.h` 与 `atomic_counter.c`：基于 C11 `_Atomic int64_t` 的锁无关原语。C 侧用结构体封装（持有 `_Atomic` 计数器数组 + 原子 `current_slot`），对外以 `void*` 句柄暴露给 Swift（Swift 导入为 `UnsafeMutableRawPointer`），规避 Swift 对 `_Atomic` 类型的互操作问题；内存由 C 侧分配/释放。
 
 ```c
-typedef struct khc_counters khc_counters_t;
+void *khc_counters_create(int64_t capacity);                 // 分配 capacity 个计数器，全零
+void khc_counters_destroy(void *handle);
 
-khc_counters_t *khc_counters_create(int64_t capacity);          // 分配 capacity 个计数器，全零
-void khc_counters_destroy(khc_counters_t *c);
-
-int64_t khc_counters_increment_current(khc_counters_t *c);      // 热路径：counter[current_slot] 原子 +1
-int64_t khc_counters_load(const khc_counters_t *c, int64_t slot);
-void    khc_counters_set_current_slot(khc_counters_t *c, int64_t slot);
-int64_t khc_counters_current_slot(const khc_counters_t *c);
-int64_t khc_counters_capacity(const khc_counters_t *c);
+int64_t khc_counters_increment_current(void *handle);        // 热路径：counter[current_slot] 原子 +1
+int64_t khc_counters_load(const void *handle, int64_t slot);
+void    khc_counters_set_current_slot(void *handle, int64_t slot);
+int64_t khc_counters_current_slot(const void *handle);
+int64_t khc_counters_capacity(const void *handle);
 ```
 
 ### 4.2 `CounterStore`（锁无关计数）
@@ -243,7 +241,6 @@ final class Aggregator {
 `Sources/KeyboardHitCounter/StatusViewModel.swift`
 
 ```swift
-@MainActor
 final class StatusViewModel: ObservableObject {
     @Published var rows: [AppRow] = []
     @Published var permissionState: PermissionState
