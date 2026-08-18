@@ -36,15 +36,19 @@ public final class PersistenceStore {
     }
 
     public func save() throws {
-        os_unfair_lock_lock(&lock)
-        let data = try JSONEncoder().encode(counts)
-        os_unfair_lock_unlock(&lock)
+        let data = try encodedCounts()
 
         try FileManager.default.createDirectory(
             at: fileURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
         try data.write(to: fileURL, options: .atomic)
+    }
+
+    private func encodedCounts() throws -> Data {
+        os_unfair_lock_lock(&lock)
+        defer { os_unfair_lock_unlock(&lock) }
+        return try JSONEncoder().encode(counts)
     }
 
     private static func load(from url: URL) -> DailyCounts {
