@@ -1,8 +1,10 @@
-import Foundation
+import SwiftUI
 
 @main
-struct KeyboardHitCounterApp {
-    static func main() {
-        print("KeyboardHitCounter scaffold")
+struct KeyboardHitCounterApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
+    var body: some Scene {
+        Settings { EmptyView() }
     }
 }
