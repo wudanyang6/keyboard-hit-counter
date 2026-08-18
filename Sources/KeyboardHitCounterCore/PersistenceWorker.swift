@@ -58,7 +58,11 @@ public final class PersistenceWorker {
         )
         mergedBySlot = merged
         store.accumulate(deltas: deltas, dayKey: Self.dayKey())
-        try? store.save()
+        do {
+            try store.save()
+        } catch {
+            NSLog("KeyboardHitCounter: persist failed: \(error)")
+        }
     }
 
     /// 纯函数：给定当前计数与已合并计数，返回 (增量, 新的已合并计数)。可独立测试。

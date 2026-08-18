@@ -32,7 +32,7 @@ final class PersistenceWorkerTests: XCTestCase {
     func testDayKeyFormat() {
         var components = DateComponents()
         components.year = 2026; components.month = 8; components.day = 18
-        components.timeZone = TimeZone(identifier: "UTC")
+        components.hour = 12
         let date = Calendar(identifier: .gregorian).date(from: components)!
         XCTAssertEqual(PersistenceWorker.dayKey(now: date), "2026-08-18")
     }
