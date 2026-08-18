@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import KeyboardHitCounterCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -15,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let viewModel = StatusViewModel()
     private let uiQueue = DispatchQueue(label: "khc.ui", qos: .userInitiated)
     private var aggregatorTimer: DispatchSourceTimer?
+    private var permissionTimer: Timer?
     private var tap: KeyEventTap?
     private var menuBarController: MenuBarController?
 
@@ -35,8 +37,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startTap() {
-        tap = KeyEventTap { [weak self] in
-            self?.counters.incrementCurrentSlot()
+        let counters = self.counters
+        tap = KeyEventTap {
+            counters.incrementCurrentSlot()
         }
         switch tap?.start() {
         case .success:
@@ -55,6 +58,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         timer.setEventHandler { [weak self] in self?.refreshUI() }
         timer.resume()
         aggregatorTimer = timer
+
+        permissionTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.recoverPermissionIfGranted()
+        }
+    }
+
+    private func recoverPermissionIfGranted() {
+        guard viewModel.permissionState == .denied, AXIsProcessTrusted() else { return }
+        startTap()
     }
 
     private func refreshUI() {
