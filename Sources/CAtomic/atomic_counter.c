@@ -42,6 +42,9 @@ int64_t khc_counters_load(const void *handle, int64_t slot) {
 
 void khc_counters_set_current_slot(void *handle, int64_t slot) {
     struct khc_counters *c = (struct khc_counters *)handle;
+    if (slot < 0 || slot >= c->capacity) {
+        slot = 0;
+    }
     atomic_store_explicit(&c->current_slot, slot, memory_order_relaxed);
 }
 

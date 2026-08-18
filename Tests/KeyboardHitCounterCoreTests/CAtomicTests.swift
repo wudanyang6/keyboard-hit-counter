@@ -25,4 +25,19 @@ final class CAtomicTests: XCTestCase {
         XCTAssertEqual(khc_counters_load(c, -1), 0)
         XCTAssertEqual(khc_counters_load(c, 5), 0)
     }
+
+    func testSetOutOfRangeSlotClampsToZero() {
+        let c = khc_counters_create(4)
+        defer { khc_counters_destroy(c) }
+
+        khc_counters_set_current_slot(c, 999)
+        XCTAssertEqual(khc_counters_current_slot(c), 0)
+
+        khc_counters_set_current_slot(c, -3)
+        XCTAssertEqual(khc_counters_current_slot(c), 0)
+
+        // 越界被钳制到 0 后，热路径 increment 仍安全
+        XCTAssertEqual(khc_counters_increment_current(c), 1)
+        XCTAssertEqual(khc_counters_load(c, 0), 1)
+    }
 }
