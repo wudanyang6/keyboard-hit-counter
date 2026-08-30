@@ -43,4 +43,18 @@ final class AggregatorTests: XCTestCase {
         )
         XCTAssertTrue(rows.isEmpty)
     }
+
+    func testEqualTodayCountsOrderedStablyByBundleID() {
+        var counts = DailyCounts()
+        counts.days["2026-08-18"] = ["com.b": 5, "com.a": 5]
+
+        let rows = Aggregator().produceRows(
+            counts: counts,
+            sessionDeltaByBundleID: [:],
+            metadataByBundleID: [:],
+            dayKey: "2026-08-18"
+        )
+
+        XCTAssertEqual(rows.map(\.bundleID), ["com.a", "com.b"])
+    }
 }

@@ -49,6 +49,7 @@ public final class Aggregator {
                 totalCount: totalCount
             )
         }
-        .sorted { $0.todayCount > $1.todayCount }
+        // 今日次数降序，次数相同时以 bundleID 兜底，保证排序确定、稳定。
+        .sorted { $0.todayCount != $1.todayCount ? $0.todayCount > $1.todayCount : $0.bundleID < $1.bundleID }
     }
 }
