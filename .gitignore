@@ -1,6 +1,20 @@
+# macOS
 .DS_Store
+
+# SwiftPM / Xcode
 .build/
 .swiftpm/
 build/
 DerivedData/
 xcuserdata/
+*.xcodeproj
+*.xcworkspace
+
+# AI 工具的本地状态，不属于项目产物
+.omc/
+.claude/
+.superpowers/
+.remember/
+
+# 内部部署配置，不对外
+.popo.json

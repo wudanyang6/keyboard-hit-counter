@@ -5,13 +5,15 @@
     <key>CFBundleName</key>
     <string>KeyboardHitCounter</string>
     <key>CFBundleIdentifier</key>
-    <string>dev.local.KeyboardHitCounter</string>
+    <string>io.github.wudanyang6.KeyboardHitCounter</string>
     <key>CFBundleExecutable</key>
     <string>KeyboardHitCounter</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>CFBundleShortVersionString</key>
     <string>0.1.0</string>
+    <key>CFBundleIconFile</key>
+    <string>KeyboardHitCounter</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSUIElement</key>
@@ -20,5 +22,9 @@
     <true/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2026 wudanyang. Licensed under GPL-3.0.</string>
 </dict>
 </plist>
